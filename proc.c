@@ -390,6 +390,55 @@ wait(void)
 //  - swtch to start running that process
 //  - eventually that process transfers control
 //      via swtch back to the scheduler.
+// void
+// scheduler(void)
+// {
+//   struct proc *p;
+//   struct cpu *c = mycpu();
+//   c->proc = 0;
+  
+//   for(;;){
+//     // Enable interrupts on this processor.
+//     sti();
+//     struct proc *lp = 0;
+//     int lnice = 21;
+
+//     // Loop over process table looking for process to run.
+//     acquire(&ptable.lock);
+//     for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
+//       if(p->state != RUNNABLE)
+//         continue;
+
+//       if(lp == 0 || p->nice < lnice) {
+// 		lnice = p->nice;
+// 		lp = p;
+//       }
+//     }
+
+//     if(lp) {
+//       int spid = lp->pid;
+//       do {
+//       	c->proc = lp;
+//       	switchuvm(lp);
+//       	lp->state = RUNNING;
+//       	swtch(&(c->scheduler), lp->context);
+//       	switchkvm();
+//       	c->proc = 0;
+
+//       	lp = 0;
+//       	lnice = 21;
+//       	for(p = ptable.proc; p < &ptable.proc[NPROC]; p++) {
+//       	  if(p->state == RUNNABLE && p->nice < lnice){
+//       	  	lp = p;
+//       	  	lnice = p->nice;
+//       	  }
+//       	}
+//       } while(lp && lp->nice == p->nice && lp->pid != spid);
+//     }
+//     release(&ptable.lock);
+
+//   }
+// }
 void
 scheduler(void)
 {
@@ -397,46 +446,58 @@ scheduler(void)
   struct cpu *c = mycpu();
   c->proc = 0;
   
+  struct proc *index = 0;
+  struct proc *start;
+  int min = 20;
+  int bit = 0;
+  int twice = 0;
   for(;;){
     // Enable interrupts on this processor.
     sti();
-    struct proc *lp = 0;
-    int lnice = 21;
 
     // Loop over process table looking for process to run.
     acquire(&ptable.lock);
-    for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
+    if(!bit){
+      //index = ptable.proc;
+      start = ptable.proc;
+      bit = 1;
+    }
+    for(p = start; p <= &ptable.proc[NPROC]; p++){ //p = index + 1
+      if(p >= &ptable.proc[NPROC]){
+        p = ptable.proc;
+      }
+      if(p == start && twice){
+        if(index == &ptable.proc[NPROC] - 1){
+          start = ptable.proc;
+        }
+        else{start = index + 1;}
+        twice = 0;
+        min = 20;
+        break;
+      }
+      twice = 1;
       if(p->state != RUNNABLE)
         continue;
-
-      if(lp == 0 || p->nice < lnice) {
-		lnice = p->nice;
-		lp = p;
+      if(p -> nice < min){ 
+        index = p;
+        min = p -> nice;
       }
     }
+      // Switch to chosen process.  It is the process's job
+      // to release ptable.lock and then reacquire it
+      // before jumping back to us.
+      c->proc = index;
+      switchuvm(index);
+      index->state = RUNNING;
 
-    if(lp) {
-      int spid = lp->pid;
-      do {
-      	c->proc = lp;
-      	switchuvm(lp);
-      	lp->state = RUNNING;
-      	swtch(&(c->scheduler), lp->context);
-      	switchkvm();
-      	c->proc = 0;
+      swtch(&(c->scheduler), index->context);
+      switchkvm();
 
-      	lp = 0;
-      	lnice = 21;
-      	for(p = ptable.proc; p < &ptable.proc[NPROC]; p++) {
-      	  if(p->state == RUNNABLE && p->nice < lnice){
-      	  	lp = p;
-      	  	lnice = p->nice;
-      	  }
-      	}
-      } while(lp && lp->nice == p->nice && lp->pid != spid);
-    }
+      // Process is done running for now.
+      // It should have changed its p->state before coming back.
+      c->proc = 0;
+      min = 20;
     release(&ptable.lock);
-
   }
 }
 
